@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Why AI Workloads Need Job-Completion Reliability — VectorFabric</title>
+<meta name="description" content="AI infrastructure reliability is the discipline of turning expensive compute into completed, recoverable, and reviewable work across fragmented GPU infrastructure." />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+<style>
+  :root {
+    --ink: #0B1220;
+    --surface: #121B2E;
+    --vf-blue: #3B71D0;
+    --pulse-flatline: #E8543E;
+    --text-primary: #F4F6FB;
+    --text-dim: #7C8AA6;
+
+    --surface-2: #16203A;
+    --hairline: rgba(124, 138, 166, 0.18);
+    --hairline-strong: rgba(124, 138, 166, 0.34);
+    --vf-blue-dim: rgba(59, 113, 208, 0.14);
+    --vf-blue-line: rgba(59, 113, 208, 0.45);
+    --flat-dim: rgba(232, 84, 62, 0.12);
+    --flat-line: rgba(232, 84, 62, 0.5);
+
+    --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+    --measure: 66ch;
+    --gutter: clamp(20px, 5vw, 48px);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+  body {
+    margin: 0;
+    background: var(--ink);
+    color: var(--text-primary);
+    font-family: var(--sans);
+    font-size: 18px;
+    line-height: 1.72;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow-x: hidden;
+  }
+  ::selection { background: rgba(59, 113, 208, 0.4); color: #fff; }
+  a { color: var(--vf-blue); }
+
+  /* reading progress */
+  .progress { position: fixed; top: 0; left: 0; height: 3px; width: 0%; background: var(--vf-blue); z-index: 60; transition: width 0.08s linear; box-shadow: 0 0 10px rgba(59,113,208,0.6); }
+  @media (prefers-reduced-motion: reduce) { .progress { transition: none; } }
+
+  /* layout: article + side rail */
+  .shell { max-width: 1180px; margin: 0 auto; padding: 0 var(--gutter); }
+  .doc { display: grid; grid-template-columns: 1fr; gap: 0; }
+  @media (min-width: 1080px) {
+    .doc { grid-template-columns: 220px minmax(0, 1fr); gap: 56px; align-items: start; }
+  }
+
+  /* side rail TOC */
+  .rail { display: none; }
+  @media (min-width: 1080px) {
+    .rail { display: block; position: sticky; top: 84px; align-self: start; }
+    .rail .label { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 16px; }
+    .rail ol { list-style: none; margin: 0; padding: 0; border-left: 1px solid var(--hairline); }
+    .rail li a { display: block; font-family: var(--mono); font-size: 12px; line-height: 1.4; color: var(--text-dim); text-decoration: none; padding: 8px 0 8px 14px; margin-left: -1px; border-left: 1px solid transparent; transition: color 0.2s ease, border-color 0.2s ease; }
+    .rail li a:hover { color: var(--text-primary); }
+    .rail li a.active { color: var(--vf-blue); border-left-color: var(--vf-blue); }
+  }
+
+  .article { min-width: 0; }
+  .article > * { max-width: var(--measure); }
+  .article > .full { max-width: none; }
+
+  /* masthead */
+  .masthead { padding: clamp(56px, 9vw, 104px) 0 clamp(36px, 5vw, 56px); }
+  .kicker { font-family: var(--mono); font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--vf-blue); margin: 0 0 22px; display: flex; align-items: center; gap: 10px; }
+  .kicker .brand { color: var(--text-primary); }
+  .kicker .dot { width: 4px; height: 4px; border-radius: 50%; background: var(--text-dim); }
+  h1 { font-size: clamp(34px, 6vw, 60px); line-height: 1.04; letter-spacing: -0.03em; font-weight: 600; margin: 0; max-width: 18ch; }
+  .standfirst { font-size: clamp(18px, 2.4vw, 22px); color: var(--text-dim); margin: 26px 0 0; max-width: 58ch; line-height: 1.55; }
+  .standfirst b { color: var(--text-primary); font-weight: 500; }
+  .byline { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 30px; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.06em; color: var(--text-dim); border-top: 1px solid var(--hairline); padding-top: 20px; }
+  .byline .pp { color: var(--vf-blue); }
+
+  /* prose */
+  h2 { font-size: clamp(24px, 3.4vw, 31px); letter-spacing: -0.02em; line-height: 1.12; font-weight: 600; margin: clamp(48px, 7vw, 80px) 0 6px; scroll-margin-top: 80px; }
+  h2 .num { font-family: var(--mono); font-size: 0.5em; color: var(--vf-blue); font-weight: 500; letter-spacing: 0.1em; display: block; margin-bottom: 12px; }
+  h3.subhead { font-size: clamp(18px, 2.6vw, 22px); letter-spacing: -0.01em; line-height: 1.2; font-weight: 600; color: var(--text-primary); margin: clamp(34px, 5vw, 52px) 0 2px; scroll-margin-top: 80px; }
+  p { margin: 18px 0; }
+  .article p strong, .article li strong { color: var(--text-primary); font-weight: 600; }
+  .lede { font-size: 20px; color: var(--text-primary); }
+  .lede::first-letter { float: left; font-family: var(--mono); font-weight: 600; font-size: 3.1em; line-height: 0.84; padding: 6px 14px 0 0; color: var(--vf-blue); }
+
+  /* pull quote */
+  .pull { max-width: var(--measure); margin: clamp(36px, 5vw, 56px) 0; padding: 4px 0 4px 26px; border-left: 3px solid var(--vf-blue); }
+  .pull p { font-size: clamp(22px, 3.2vw, 30px); line-height: 1.28; letter-spacing: -0.02em; color: var(--text-primary); font-weight: 500; margin: 0; }
+  .pull.warn { border-left-color: var(--pulse-flatline); }
+
+  /* figure shell */
+  figure { margin: clamp(40px, 6vw, 64px) 0; max-width: 980px; }
+  .figbox { background: var(--surface); border: 1px solid var(--hairline); border-radius: 16px; padding: clamp(22px, 3.5vw, 36px); }
+  figcaption { font-family: var(--mono); font-size: 12.5px; color: var(--text-dim); margin-top: 16px; line-height: 1.5; }
+  figcaption b { color: var(--text-primary); font-weight: 600; }
+  .figtag { font-family: var(--mono); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--vf-blue); margin: 0 0 22px; }
+  .fig-note { font-family: var(--mono); font-size: 12px; color: var(--text-dim); margin: 0 0 20px; line-height: 1.5; }
+
+  /* ---- Fig: stateless vs stateful ---- */
+  .lanes { display: grid; grid-template-columns: 1fr; gap: 16px; }
+  @media (min-width: 720px) { .lanes { grid-template-columns: 1fr 1fr; gap: 18px; } }
+  .lane { border: 1px solid var(--hairline); border-radius: 12px; padding: 20px 18px; background: var(--ink); }
+  .lane h4 { font-family: var(--mono); font-size: 13px; margin: 0 0 4px; color: var(--text-primary); letter-spacing: 0.02em; }
+  .lane .sub { font-size: 12.5px; color: var(--text-dim); margin: 0 0 20px; min-height: 2.4em; }
+  .timeline { position: relative; }
+  .tl-track { height: 12px; border-radius: 6px; background: var(--surface-2); overflow: hidden; position: relative; }
+  .tl-fill { height: 100%; border-radius: 6px; }
+  .tl-fill.blue { background: var(--vf-blue); }
+  .tl-fill.lost { background: var(--pulse-flatline); }
+  .tl-flags { position: relative; height: 18px; margin-top: 6px; }
+  .flag { position: absolute; transform: translateX(-50%); font-family: var(--mono); font-size: 9px; color: var(--text-dim); }
+  .flag::before { content: "◇"; display: block; color: var(--vf-blue); font-size: 11px; margin-bottom: 1px; }
+  .marker { position: absolute; top: -6px; transform: translateX(-50%); width: 2px; height: 24px; background: var(--pulse-flatline); }
+  .marker::after { content: "✕"; position: absolute; top: -16px; left: 50%; transform: translateX(-50%); color: var(--pulse-flatline); font-size: 12px; font-family: var(--mono); }
+  .lane-events { list-style: none; margin: 22px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+  .lane-events li { font-size: 12.5px; color: var(--text-dim); padding-left: 18px; position: relative; line-height: 1.45; }
+  .lane-events li::before { content: ""; position: absolute; left: 0; top: 7px; width: 6px; height: 6px; border-radius: 50%; background: var(--vf-blue); }
+  .lane-events li.bad::before { background: var(--pulse-flatline); }
+  .lane-events li b { color: var(--text-primary); font-weight: 600; }
+  .lane-outcome { margin-top: 18px; font-family: var(--mono); font-size: 12px; padding: 10px 12px; border-radius: 8px; }
+  .lane-outcome.ok { background: var(--vf-blue-dim); color: var(--vf-blue); }
+  .lane-outcome.bad { background: var(--flat-dim); color: var(--pulse-flatline); }
+
+  /* ---- Fig: allocated vs productive (interactive) ---- */
+  .meter { display: grid; gap: 22px; }
+  .bar-row .bar-top { display: flex; justify-content: space-between; align-items: baseline; font-family: var(--mono); font-size: 12px; color: var(--text-dim); margin-bottom: 8px; }
+  .bar-row .bar-top b { color: var(--text-primary); }
+  .meter-track { height: 30px; border-radius: 7px; background: var(--surface-2); overflow: hidden; display: flex; position: relative; }
+  .meter-seg { height: 100%; display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 10.5px; white-space: nowrap; overflow: hidden; transition: width 0.18s ease; }
+  .meter-seg.billed { background: linear-gradient(90deg, rgba(59,113,208,0.5), rgba(59,113,208,0.32)); color: var(--text-primary); width: 100%; }
+  .meter-seg.prod { background: var(--vf-blue); color: #fff; }
+  .meter-seg.stalled { background: repeating-linear-gradient(45deg, rgba(232,84,62,0.85), rgba(232,84,62,0.85) 7px, rgba(232,84,62,0.6) 7px, rgba(232,84,62,0.6) 14px); color: #fff; }
+  .control { margin-top: 8px; }
+  .control label { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); display: flex; justify-content: space-between; }
+  .control label b { color: var(--text-primary); }
+  input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; border-radius: 4px; background: var(--surface-2); outline: none; cursor: pointer; margin: 12px 0 0; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; border-radius: 50%; background: var(--pulse-flatline); border: 3px solid var(--ink); box-shadow: 0 0 0 1px var(--flat-line), 0 0 12px rgba(232,84,62,0.5); cursor: pointer; }
+  input[type="range"]::-moz-range-thumb { width: 20px; height: 20px; border-radius: 50%; background: var(--pulse-flatline); border: 3px solid var(--ink); cursor: pointer; }
+  input[type="range"]:focus-visible { outline: 2px solid var(--vf-blue); outline-offset: 4px; border-radius: 6px; }
+  input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 2px solid var(--text-primary); outline-offset: 2px; }
+  .meter-readout { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--hairline); }
+  @media (max-width: 520px) { .meter-readout { grid-template-columns: 1fr; } }
+  .ro .k { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); display: block; }
+  .ro .v { font-family: var(--mono); font-size: clamp(22px, 4vw, 30px); font-weight: 700; margin-top: 4px; }
+  .ro .v.red { color: var(--pulse-flatline); } .ro .v.blue { color: var(--vf-blue); } .ro .v.dim { color: var(--text-primary); }
+
+  /* ---- Fig: cost stack ---- */
+  .stack { display: grid; grid-template-columns: 132px 1fr; gap: clamp(18px, 3vw, 32px); align-items: stretch; }
+  @media (max-width: 560px) { .stack { grid-template-columns: 96px 1fr; } }
+  .stack-col { display: flex; flex-direction: column; justify-content: flex-end; }
+  .stack-visible { background: var(--vf-blue); border-radius: 7px 7px 0 0; padding: 12px 8px; text-align: center; font-family: var(--mono); font-size: 10px; color: #fff; }
+  .waterline { border-top: 1px dashed var(--hairline-strong); position: relative; margin: 0; }
+  .stack-hidden { display: flex; flex-direction: column; }
+  .stack-hidden .h { padding: 10px 8px; text-align: center; font-family: var(--mono); font-size: 9.5px; color: #fff; border-bottom: 1px solid rgba(11,18,32,0.55); }
+  .stack-legend { display: flex; flex-direction: column; justify-content: center; gap: 14px; }
+  .sl-item { position: relative; padding-left: 20px; font-size: 13.5px; color: var(--text-dim); }
+  .sl-item::before { content: ""; position: absolute; left: 0; top: 6px; width: 11px; height: 11px; border-radius: 3px; }
+  .sl-item.visible { color: var(--text-primary); } .sl-item.visible::before { background: var(--vf-blue); }
+  .sl-item.hidden::before { background: var(--pulse-flatline); }
+  .sl-item b { color: var(--text-primary); font-weight: 600; display: block; }
+  .waterline-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); margin: 6px 0; }
+
+  /* ---- Fig: fragmented supply ---- */
+  .sources { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  @media (max-width: 680px) { .sources { grid-template-columns: repeat(2, 1fr); } }
+  .src { border: 1px solid var(--hairline); border-radius: 10px; padding: 13px 12px; background: var(--ink); }
+  .src h5 { font-family: var(--mono); font-size: 11px; margin: 0 0 13px; color: var(--text-primary); letter-spacing: 0.01em; line-height: 1.35; min-height: 2.7em; }
+  .gauge { margin-bottom: 9px; }
+  .gauge:last-child { margin-bottom: 0; }
+  .gauge .gl { font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); display: block; margin-bottom: 3px; }
+  .gauge .gt { height: 5px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+  .gauge .gf { height: 100%; border-radius: 3px; background: var(--vf-blue); }
+
+  /* ---- Fig: orchestration layer (sandwich) ---- */
+  .orch { display: flex; flex-direction: column; align-items: center; gap: 0; }
+  .orch-row { width: 100%; max-width: 620px; border-radius: 12px; padding: 16px 18px; text-align: center; }
+  .orch-contract { border: 1px solid var(--hairline-strong); background: var(--surface-2); }
+  .orch-contract .orch-k { font-family: var(--mono); font-weight: 600; font-size: 13px; color: var(--text-primary); letter-spacing: 0.02em; }
+  .orch-contract .orch-v { display: block; font-family: var(--mono); font-size: 11px; color: var(--text-dim); margin-top: 5px; }
+  .orch-arrow { color: var(--vf-blue-line); font-size: 16px; line-height: 1; padding: 9px 0; }
+  .orch-vf { border: 1px solid var(--vf-blue); background: var(--vf-blue-dim); }
+  .orch-vf .orch-name { font-family: var(--mono); font-weight: 600; font-size: 14px; color: var(--vf-blue); letter-spacing: 0.02em; }
+  .orch-chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 13px; }
+  .orch-chip { font-family: var(--mono); font-size: 11px; color: var(--text-primary); border: 1px solid var(--vf-blue-line); border-radius: 20px; padding: 6px 12px; background: rgba(59,113,208,0.08); }
+  .orch-supply { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; max-width: 640px; }
+  .sup-chip { font-family: var(--mono); font-size: 12px; color: var(--text-primary); border: 1px solid var(--hairline-strong); border-radius: 8px; padding: 9px 15px; background: var(--surface-2); }
+  .sup-chip.more { color: var(--text-dim); border-style: dashed; }
+
+  /* ---- Fig: reliable / recoverable / reviewable triad ---- */
+  .triad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  @media (max-width: 720px) { .triad { grid-template-columns: 1fr; } }
+  .tri { border: 1px solid var(--hairline); border-radius: 12px; padding: 22px 20px; background: var(--ink); }
+  .tri .tri-k { font-family: var(--mono); font-weight: 700; font-size: 15px; color: var(--vf-blue); letter-spacing: 0.02em; display: flex; align-items: center; gap: 9px; margin-bottom: 12px; }
+  .tri .tri-k .n { font-size: 11px; color: var(--text-dim); border: 1px solid var(--hairline-strong); border-radius: 6px; padding: 2px 7px; }
+  .tri p { margin: 0; font-size: 14px; color: var(--text-dim); line-height: 1.55; }
+
+  /* endcap + footer */
+  .endcap { max-width: var(--measure); margin: clamp(48px, 7vw, 72px) 0 0; padding: 30px; border: 1px solid var(--vf-blue-line); background: var(--vf-blue-dim); border-radius: 14px; }
+  .endcap p { margin: 0 0 18px; font-size: 17px; }
+  .endcap p:last-child { margin-bottom: 0; }
+  .btn { display: inline-block; font-family: var(--mono); font-size: 13px; letter-spacing: 0.06em; padding: 12px 22px; border-radius: 9px; border: 1px solid var(--vf-blue); background: var(--vf-blue); color: #fff; text-decoration: none; transition: background 0.2s ease; }
+  .btn:hover { background: #4a7fdb; }
+  .btn.ghost { background: transparent; color: var(--text-primary); border-color: var(--hairline-strong); margin-left: 8px; }
+  .btn:focus-visible { outline: 2px solid var(--text-primary); outline-offset: 3px; }
+
+  footer { border-top: 1px solid var(--hairline); margin-top: clamp(56px, 8vw, 96px); padding: 30px 0; }
+  footer .row { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; font-family: var(--mono); font-size: 12px; color: var(--text-dim); letter-spacing: 0.04em; }
+  footer a { color: var(--text-dim); }
+
+  .reveal { opacity: 0; transform: translateY(16px); transition: opacity 0.7s ease, transform 0.7s ease; }
+  .reveal.in { opacity: 1; transform: none; }
+  @media (prefers-reduced-motion: reduce) { .reveal { opacity: 1; transform: none; transition: none; } }
+
+  a.skip { position: absolute; left: -9999px; top: 0; }
+  a.skip:focus { left: 12px; top: 12px; z-index: 100; background: var(--vf-blue); color: #fff; padding: 8px 14px; border-radius: 6px; font-family: var(--mono); font-size: 13px; }
+</style>
+</head>
+<body>
+<a href="#article" class="skip">Skip to article</a>
+<div class="progress" id="progress" aria-hidden="true"></div>
+
+<div class="shell">
+  <div class="doc">
+
+    <!-- side rail -->
+    <nav class="rail" aria-label="Article contents">
+      <div class="label">Contents</div>
+      <ol>
+        <li><a href="#fragmented">Fragmented supply</a></li>
+        <li><a href="#state">Accumulating state</a></li>
+        <li><a href="#completed">Completed work</a></li>
+        <li><a href="#machine">Health vs progress</a></li>
+        <li><a href="#evidence">Evidence</a></li>
+        <li><a href="#orchestration">Orchestration layer</a></li>
+        <li><a href="#triad">Reliable · recoverable</a></li>
+      </ol>
+    </nav>
+
+    <article class="article" id="article">
+
+      <!-- MASTHEAD -->
+      <header class="masthead">
+        <p class="kicker"><span class="brand">VECTORFABRIC</span> <span class="dot"></span> On reliability</p>
+        <h1>Why AI workloads need job-completion reliability</h1>
+        <p class="standfirst">
+          AI infrastructure reliability is the discipline of turning expensive compute into
+          <b>completed, recoverable, and reviewable work.</b>
+        </p>
+        <div class="byline">
+          <span>VectorFabric</span>
+          <span>~6 min read</span>
+
+        </div>
+      </header>
+
+      <!-- INTRO -->
+      <p class="lede">
+        In conventional compute environments, reliability is often understood through signals such as machine health,
+        uptime, allocation success, restart behavior, latency, and request completion. Those measures remain useful
+        because they describe whether infrastructure is available and responsive. AI workloads add a job-level reliability
+        question, because value accumulates over time, across long-running execution, checkpoint state, intermediate
+        artifacts, and recovery decisions.
+      </p>
+      <p>
+        As AI teams move beyond hyperscalers in search of lower-cost GPU supply, the reliability question becomes economic.
+        A lower GPU-hour price creates value only when the workload finishes with usable output. When jobs stall, restart
+        from scratch, lose checkpoint state, or require manual recovery, the cost advantage of cheaper infrastructure can
+        be absorbed by repeated work and delayed outcomes.
+      </p>
+      <p>
+        At Vector Fabric, this is the reliability model we are building toward: <strong>AI jobs that are reliable,
+        recoverable, and reviewable across fragmented GPU infrastructure.</strong>
+      </p>
+
+      <!-- ===== PROBLEM ===== -->
+      <h2 id="problem"><span class="num">01 · The problem</span>What is the problem?</h2>
+
+      <h3 class="subhead" id="fragmented">Fragmented GPU supply changes the operating model</h3>
+      <p>
+        AI teams are under pressure to find cheaper and more flexible compute. Hyperscalers provide mature infrastructure,
+        standardized environments, and enterprise operating models. Alternative GPU providers and marketplaces offer lower
+        headline prices, flexible provisioning, and access to capacity outside the dominant cloud platforms.
+      </p>
+      <p>
+        The market has improved access to GPUs, while execution reliability remains uneven across fragmented supply. Raw
+        GPU access gives teams a place to run workloads. It does not, by itself, ensure that the workload will complete
+        cleanly, recover safely, or produce evidence the team can trust.
+      </p>
+
+      <figure class="full reveal">
+        <div class="figbox">
+          <p class="figtag">Fragmented GPU supply</p>
+          <p class="fig-note">Raw GPU access — same job, different odds of finishing cleanly. Each source carries its own reliability, pricing, and observability profile.</p>
+          <div class="sources">
+            <div class="src">
+              <h5>Hyperscalers</h5>
+              <div class="gauge"><span class="gl">reliability</span><div class="gt"><div class="gf" style="width:90%"></div></div></div>
+              <div class="gauge"><span class="gl">cost edge</span><div class="gt"><div class="gf" style="width:25%"></div></div></div>
+              <div class="gauge"><span class="gl">observability</span><div class="gt"><div class="gf" style="width:85%"></div></div></div>
+            </div>
+            <div class="src">
+              <h5>Regional providers</h5>
+              <div class="gauge"><span class="gl">reliability</span><div class="gt"><div class="gf" style="width:62%"></div></div></div>
+              <div class="gauge"><span class="gl">cost edge</span><div class="gt"><div class="gf" style="width:70%"></div></div></div>
+              <div class="gauge"><span class="gl">observability</span><div class="gt"><div class="gf" style="width:52%"></div></div></div>
+            </div>
+            <div class="src">
+              <h5>GPU marketplaces</h5>
+              <div class="gauge"><span class="gl">reliability</span><div class="gt"><div class="gf" style="width:42%"></div></div></div>
+              <div class="gauge"><span class="gl">cost edge</span><div class="gt"><div class="gf" style="width:92%"></div></div></div>
+              <div class="gauge"><span class="gl">observability</span><div class="gt"><div class="gf" style="width:34%"></div></div></div>
+            </div>
+            <div class="src">
+              <h5>Internal capacity</h5>
+              <div class="gauge"><span class="gl">reliability</span><div class="gt"><div class="gf" style="width:75%"></div></div></div>
+              <div class="gauge"><span class="gl">cost edge</span><div class="gt"><div class="gf" style="width:58%"></div></div></div>
+              <div class="gauge"><span class="gl">observability</span><div class="gt"><div class="gf" style="width:70%"></div></div></div>
+            </div>
+            <div class="src">
+              <h5>Mixed deployments</h5>
+              <div class="gauge"><span class="gl">reliability</span><div class="gt"><div class="gf" style="width:54%"></div></div></div>
+              <div class="gauge"><span class="gl">cost edge</span><div class="gt"><div class="gf" style="width:64%"></div></div></div>
+              <div class="gauge"><span class="gl">observability</span><div class="gt"><div class="gf" style="width:46%"></div></div></div>
+            </div>
+          </div>
+          <figcaption>
+            Access to GPUs is largely solved; <b>execution reliability is uneven across fragmented supply.</b> Raw access
+            gives a team a place to run a workload — not a guarantee it completes cleanly, recovers safely, or produces
+            trustworthy evidence.
+          </figcaption>
+        </div>
+      </figure>
+
+      <p>
+        That distinction matters because AI infrastructure spend is increasingly judged by completed work rather than
+        rented capacity. A job that starts on cheaper infrastructure can still become expensive when it fails late, repeats
+        work, or requires human intervention to recover.
+      </p>
+
+      <h3 class="subhead" id="state">AI workloads accumulate state over time</h3>
+      <p>
+        Many AI workloads are long-running, stateful, and checkpoint-dependent. A fine-tuning run, embedding pipeline,
+        training job, or long-running batch inference workload may run for hours while useful progress accumulates across
+        compute, storage, logs, checkpoints, and artifacts.
+      </p>
+
+      <figure class="full reveal">
+        <div class="figbox">
+          <p class="figtag">Stateless work vs. stateful work</p>
+          <div class="lanes">
+            <div class="lane">
+              <h4>Stateless work</h4>
+              <p class="sub">Web requests, containers, batch retries — value does not accumulate.</p>
+              <div class="timeline">
+                <div class="tl-track"><div class="tl-fill blue" style="width:100%"></div><div class="marker" style="left:55%"></div></div>
+                <div class="tl-flags"></div>
+              </div>
+              <ul class="lane-events">
+                <li>A unit of work runs independently</li>
+                <li class="bad"><b>Failure</b> — the request or task dies</li>
+                <li><b>Retry from the start</b>, instantly</li>
+              </ul>
+              <div class="lane-outcome ok">Outcome: nothing of value is lost</div>
+            </div>
+
+            <div class="lane">
+              <h4>Stateful work</h4>
+              <p class="sub">Training, fine-tuning, embedding, long batch inference — value accumulates.</p>
+              <div class="timeline">
+                <div class="tl-track">
+                  <div class="tl-fill blue" style="width:55%"></div>
+                  <div class="tl-fill lost" style="width:25%"></div>
+                  <div class="marker" style="left:80%"></div>
+                </div>
+                <div class="tl-flags">
+                  <span class="flag" style="left:18%">ckpt</span>
+                  <span class="flag" style="left:55%">ckpt</span>
+                </div>
+              </div>
+              <ul class="lane-events">
+                <li>Progress accumulates in state &amp; checkpoints</li>
+                <li class="bad"><b>Failure</b> — roll back to last valid checkpoint</li>
+                <li class="bad"><b>Lost progress</b> + recovery decision before resume</li>
+              </ul>
+              <div class="lane-outcome bad">Outcome: work since the last checkpoint is gone</div>
+            </div>
+          </div>
+          <figcaption>
+            The same fault has two different price tags. <b>Stateless work retries for free; stateful work pays in lost
+            progress.</b> Checkpointing makes recovery possible — but only if the latest checkpoint was written, stored,
+            associated with the right job state, and validated before resume.
+          </figcaption>
+        </div>
+      </figure>
+
+      <p>
+        Failure in this environment creates a state problem. The team has to determine how much progress was preserved,
+        whether the latest checkpoint is valid, whether the job can resume safely, and whether the final output can be
+        trusted. The failure is no longer only an infrastructure event; it becomes a question about preserved work,
+        recovery confidence, and the integrity of the execution path.
+      </p>
+      <p>
+        Checkpointing makes recovery possible, but it also creates a reliability obligation. A checkpoint has to be written
+        successfully, stored durably, associated with the correct job state, and validated before the system resumes
+        execution. If that chain is weak, the team may repeat work, lose progress, or continue from an uncertain state.
+      </p>
+
+      <!-- ===== WHY IT MATTERS ===== -->
+      <h2 id="why"><span class="num">02 · Why it matters</span>Why reliability matters</h2>
+
+      <h3 class="subhead" id="completed">The real metric is completed work</h3>
+      <p>
+        AI infrastructure economics are often discussed through GPU-hour pricing, because GPU-hours are the visible unit of
+        purchase. The more meaningful unit is the completed AI job.
+      </p>
+
+      <figure class="full reveal">
+        <div class="figbox">
+          <p class="figtag">Effective cost per completed job</p>
+          <div class="stack">
+            <div class="stack-col">
+              <div class="stack-visible">VISIBLE<br>GPU-HOUR<br>PRICE</div>
+              <div class="waterline"></div>
+              <div class="stack-hidden">
+                <div class="h" style="background:rgba(232,84,62,0.92)">failed starts</div>
+                <div class="h" style="background:rgba(232,84,62,0.84)">idle time</div>
+                <div class="h" style="background:rgba(232,84,62,0.76)">lost progress</div>
+                <div class="h" style="background:rgba(232,84,62,0.68)">retries</div>
+                <div class="h" style="background:rgba(232,84,62,0.60)">checkpoint recovery</div>
+                <div class="h" style="background:rgba(232,84,62,0.52)">debugging</div>
+                <div class="h" style="background:rgba(232,84,62,0.44)">operator time</div>
+                <div class="h" style="background:rgba(232,84,62,0.34)">delays to artifacts</div>
+              </div>
+            </div>
+            <div class="stack-legend">
+              <div class="sl-item visible"><b>The visible unit of purchase</b>The advertised GPU-hour price, the tip above the waterline.</div>
+              <div class="waterline-label">— — — waterline: the price quote — — —</div>
+              <div class="sl-item hidden"><b>The full economic path</b>Failed starts, idle time, lost progress, retries, checkpoint recovery, debugging, operator time, and delays to usable artifacts, all hidden below the line.</div>
+            </div>
+          </div>
+          <figcaption>
+            Effective cost per completed AI job captures the full path from allocation to output. <b>A lower hourly rate
+            can still lead to a higher completed-work cost when the execution path is fragile.</b>
+          </figcaption>
+        </div>
+      </figure>
+
+      <div class="pull warn"><p>A lower hourly rate can still lead to a higher completed-work cost when the execution path is fragile.</p></div>
+
+      <p>
+        This is why reliability matters to AI infrastructure strategy. Teams are paying for model progress, inference
+        throughput, usable artifacts, and product velocity. Reliability determines how efficiently compute becomes those
+        outcomes.
+      </p>
+
+      <h3 class="subhead" id="machine">Machine-level health does not capture workload progress</h3>
+      <p>
+        AI workloads depend on the interaction between compute, storage, networking, orchestration, and application-level
+        state. A GPU can be allocated and technically healthy while the workload has stopped making useful progress. A
+        process can remain alive while synchronization stalls. A node can continue running while checkpoint writes slow
+        down, fail, or become unreliable.
+      </p>
+
+      <figure class="full reveal">
+        <div class="figbox">
+          <p class="figtag">Allocated ≠ productive</p>
+          <div class="meter">
+            <div class="bar-row">
+              <div class="bar-top"><span>Billed GPU time</span><b id="billed-pct">100%</b></div>
+              <div class="meter-track"><div class="meter-seg billed">you pay for every hour the GPU is held</div></div>
+            </div>
+            <div class="bar-row">
+              <div class="bar-top"><span>Useful progress</span><b id="prog-pct">62%</b></div>
+              <div class="meter-track">
+                <div class="meter-seg prod" id="seg-prod" style="width:62%">advancing</div>
+                <div class="meter-seg stalled" id="seg-stalled" style="width:38%">allocated &amp; healthy — but stalled</div>
+              </div>
+            </div>
+            <div class="control">
+              <label for="stall">Job stalls at <b id="stall-val">62%</b> of the run</label>
+              <input type="range" id="stall" min="0" max="100" step="1" value="62" />
+            </div>
+            <div class="meter-readout">
+              <div class="ro"><span class="k">Hours billed</span><span class="v dim">100%</span></div>
+              <div class="ro"><span class="k">Hours that advanced the job</span><span class="v blue" id="ro-prod">62%</span></div>
+              <div class="ro"><span class="k">Paid for stalled compute</span><span class="v red" id="ro-stalled">38%</span></div>
+            </div>
+          </div>
+          <figcaption>
+            Machine-level signals describe infrastructure condition; workload-level signals describe whether the job is
+            advancing. <b>A healthy, allocated GPU that has stopped advancing the job is billed exactly the same as one
+            doing real work.</b>
+          </figcaption>
+        </div>
+      </figure>
+
+      <p>
+        Machine-level signals describe infrastructure condition. Workload-level signals describe whether the job is
+        advancing. AI teams need both views, because the economic failure often appears in the gap between allocated
+        compute and useful progress.
+      </p>
+
+      <div class="pull warn"><p>The economic failure often appears in the gap between allocated compute and useful progress.</p></div>
+
+      <h3 class="subhead" id="evidence">Evidence becomes part of reliability</h3>
+      <p>
+        As AI workloads move closer to enterprise use, reviewability becomes part of the reliability model. Engineering
+        teams need to debug failed or degraded runs. Finance teams need to understand how compute spend converted into
+        output. Security and governance teams need visibility into workload placement, artifact handling, recovery
+        behavior, and execution history.
+      </p>
+      <p>
+        Execution evidence turns reliability into an operating record. It shows where the job ran, when it started and
+        ended, what checkpoints were written, what failed, how recovery happened, and whether the job reached a
+        trustworthy terminal state.
+      </p>
+
+      <div class="pull"><p>For serious AI work, reliability is measured through completion, recovery, and evidence.</p></div>
+
+      <!-- ===== WHY VECTOR FABRIC ===== -->
+      <h2 id="vectorfabric"><span class="num">03 · Vector Fabric</span>Why Vector Fabric?</h2>
+
+      <h3 class="subhead" id="orchestration">A job-completion orchestration layer</h3>
+      <p>
+        Vector Fabric is building a job-completion orchestration layer for AI workloads running across fragmented GPU
+        infrastructure.
+      </p>
+      <p>
+        The product objective is to make heterogeneous GPU supply usable for serious AI work by adding execution controls
+        above raw compute access. That starts with a workload contract: what kind of job is running, what reliability level
+        it needs, what recovery behavior is acceptable, and what evidence should exist at the end.
+      </p>
+
+      <figure class="full reveal">
+        <div class="figbox">
+          <p class="figtag">A job-completion orchestration layer</p>
+          <div class="orch">
+            <div class="orch-row orch-contract">
+              <span class="orch-k">Workload contract</span>
+              <span class="orch-v">job type · reliability level · recovery behavior · required evidence</span>
+            </div>
+            <div class="orch-arrow" aria-hidden="true">↓</div>
+            <div class="orch-row orch-vf">
+              <span class="orch-name">VectorFabric · job-completion orchestration</span>
+              <div class="orch-chips">
+                <span class="orch-chip">validate environment</span>
+                <span class="orch-chip">track progress</span>
+                <span class="orch-chip">recover from checkpoint</span>
+                <span class="orch-chip">produce evidence</span>
+              </div>
+            </div>
+            <div class="orch-arrow" aria-hidden="true">↓</div>
+            <div class="orch-supply">
+              <span class="sup-chip">Hyperscalers</span>
+              <span class="sup-chip">Regional providers</span>
+              <span class="sup-chip">GPU marketplaces</span>
+              <span class="sup-chip">Internal capacity</span>
+              <span class="sup-chip more">+ others</span>
+            </div>
+          </div>
+          <figcaption>
+            Execution controls sit above raw compute access. <b>The layer is organized around continuity of work</b> —
+            where cost, reliability, and trust converge — turning fragmented GPU supply into completed, recoverable, and
+            reviewable jobs.
+          </figcaption>
+        </div>
+      </figure>
+
+      <p>
+        From there, Vector Fabric validates the environment before execution, tracks progress while the job runs, recovers
+        from trusted checkpoint state when failure occurs, and produces reviewable evidence after completion. The control
+        layer is organized around continuity of work, because continuity is where cost, reliability, and trust converge.
+      </p>
+
+      <h3 class="subhead" id="triad">Reliable, recoverable, and reviewable AI work</h3>
+      <!-- <p>
+        Reliable execution reduces avoidable failure by validating the environment before serious GPU spend begins.
+        Credentials, storage paths, runtime images, provider readiness, and job assumptions need to be checked before the
+        workload consumes meaningful budget.
+      </p>
+      <p>
+        Recoverable execution preserves progress and resumes from trusted checkpoint state. Recovery has to reflect the
+        work that was actually preserved, rather than treating every interruption as a restart.
+      </p>
+      <p>
+        Reviewable execution creates a record of the run: the environment, checkpoints, failures, restarts, artifacts, and
+        completion state. That record supports engineering review, financial visibility, and enterprise trust.
+      </p> -->
+
+      <figure class="full reveal">
+        <div class="figbox">
+          <p class="figtag">Reliable · recoverable · reviewable</p>
+          <div class="triad">
+            <div class="tri">
+              <span class="tri-k"><span class="n">01</span> Reliable</span>
+              <p>Reliable execution reduces avoidable failure by validating the environment before serious GPU spend begins.
+        Credentials, storage paths, runtime images, provider readiness, and job assumptions need to be checked before the
+        workload consumes meaningful budget.</p>
+            </div>
+            <div class="tri">
+              <span class="tri-k"><span class="n">02</span> Recoverable</span>
+              <p>Recoverable execution preserves progress and resumes from trusted checkpoint state. Recovery has to reflect the
+        work that was actually preserved, rather than treating every interruption as a restart.</p>
+            </div>
+            <div class="tri">
+              <span class="tri-k"><span class="n">03</span> Reviewable</span>
+              <p>Reviewable execution creates a record of the run: the environment, checkpoints, failures, restarts, artifacts, and
+        completion state. That record supports engineering review, financial visibility, and enterprise trust.</p>
+            </div>
+          </div>
+          <figcaption>The three properties that turn rented capacity into trustworthy outcomes — supporting engineering review, financial visibility, and enterprise trust.</figcaption>
+        </div>
+      </figure>
+
+      <div class="endcap reveal">
+        <p>
+          AI infrastructure will increasingly be judged by its ability to convert compute into completed outcomes.
+          Vector Fabric is built around that shift.
+        </p>
+        <p>
+          <strong>The next layer of AI infrastructure must help teams turn fragmented GPU supply into
+          completed, recoverable, and reviewable AI work.</strong>
+        </p>
+        <p style="margin-top:24px;">
+          <a class="btn" href="mailto:hello@vectorfabric.io?subject=VectorFabric%20—%20job-completion%20reliability">Talk to us</a>
+          <a class="btn ghost" href="index.html">See the comparison →</a>
+        </p>
+      </div>
+
+    </article>
+  </div>
+
+  <footer>
+    <div class="row">
+      <span>© 2026 Dhitantra Inc. d/b/a Vector Fabric</span>
+      <!-- <span><a href="index.html">Comparison</a> · Patent Pending</span> -->
+    </div>
+  </footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* reading progress */
+  var bar = document.getElementById("progress");
+  function onScroll() {
+    var h = document.documentElement;
+    var max = h.scrollHeight - h.clientHeight;
+    var pct = max > 0 ? (h.scrollTop / max) * 100 : 0;
+    bar.style.width = pct.toFixed(2) + "%";
+  }
+  window.addEventListener("scroll", onScroll, { passive: true });
+  onScroll();
+
+  /* active section in rail */
+  var links = Array.prototype.slice.call(document.querySelectorAll(".rail a"));
+  var map = {};
+  links.forEach(function (a) { map[a.getAttribute("href").slice(1)] = a; });
+  if ("IntersectionObserver" in window && links.length) {
+    var secObs = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) {
+          links.forEach(function (l) { l.classList.remove("active"); });
+          if (map[e.target.id]) map[e.target.id].classList.add("active");
+        }
+      });
+    }, { rootMargin: "-20% 0px -70% 0px" });
+    Object.keys(map).forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) secObs.observe(el);
+    });
+  }
+
+  /* Figure 4: allocated vs productive */
+  (function () {
+    var stall = document.getElementById("stall");
+    if (!stall) return;
+    var segProd = document.getElementById("seg-prod");
+    var segStalled = document.getElementById("seg-stalled");
+    var progPct = document.getElementById("prog-pct");
+    var stallVal = document.getElementById("stall-val");
+    var roProd = document.getElementById("ro-prod");
+    var roStalled = document.getElementById("ro-stalled");
+    function update() {
+      var v = parseInt(stall.value, 10);
+      segProd.style.width = v + "%";
+      segStalled.style.width = (100 - v) + "%";
+      progPct.textContent = v + "%";
+      stallVal.textContent = v + "%";
+      roProd.textContent = v + "%";
+      roStalled.textContent = (100 - v) + "%";
+      segStalled.style.display = v >= 100 ? "none" : "flex";
+      segProd.textContent = v > 18 ? "advancing" : "";
+      segStalled.textContent = (100 - v) > 26 ? "allocated & healthy — but stalled" : "";
+    }
+    stall.addEventListener("input", update);
+    update();
+  })();
+
+  /* reveal */
+  if (!reduceMotion && "IntersectionObserver" in window) {
+    var rev = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add("in"); rev.unobserve(e.target); } });
+    }, { threshold: 0.1 });
+    document.querySelectorAll(".reveal").forEach(function (el) { rev.observe(el); });
+  } else {
+    document.querySelectorAll(".reveal").forEach(function (el) { el.classList.add("in"); });
+  }
+})();
+</script>
+</body>
+</html>
