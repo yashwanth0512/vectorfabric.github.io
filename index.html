@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>VectorFabric — The reliability layer for neocloud GPU compute</title>
+<meta name="description" content="VectorFabric is the job-completion reliability layer that sits on top of neocloud GPU providers — heartbeat-monitored liveness detection and checkpoint-aware automatic retry across CoreWeave, RunPod, and Lambda Labs." />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+<style>
+  :root {
+    --ink: #0B1220;
+    --surface: #121B2E;
+    --vf-blue: #3B71D0;
+    --pulse-flatline: #E8543E;
+    --text-primary: #F4F6FB;
+    --text-dim: #7C8AA6;
+
+    --surface-2: #16203A;
+    --hairline: rgba(124, 138, 166, 0.18);
+    --hairline-strong: rgba(124, 138, 166, 0.34);
+    --vf-blue-dim: rgba(59, 113, 208, 0.14);
+    --vf-blue-line: rgba(59, 113, 208, 0.45);
+    --flat-dim: rgba(232, 84, 62, 0.12);
+    --flat-line: rgba(232, 84, 62, 0.5);
+
+    --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+    --maxw: 1160px;
+    --gutter: clamp(20px, 5vw, 56px);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+  body {
+    margin: 0;
+    background: var(--ink);
+    color: var(--text-primary);
+    font-family: var(--sans);
+    font-size: 17px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow-x: hidden;
+  }
+  ::selection { background: rgba(59, 113, 208, 0.4); color: #fff; }
+  a { color: var(--vf-blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding-left: var(--gutter); padding-right: var(--gutter); }
+  section { padding: clamp(60px, 8.5vw, 120px) 0; position: relative; }
+  .section-hairline { border-top: 1px solid var(--hairline); }
+
+  .eyebrow {
+    font-family: var(--mono); font-size: 12px; font-weight: 500; letter-spacing: 0.22em;
+    text-transform: uppercase; color: var(--text-dim); margin: 0 0 18px;
+    display: inline-flex; align-items: center; gap: 10px;
+  }
+  .eyebrow::before { content: ""; width: 26px; height: 1px; background: var(--vf-blue-line); }
+  .eyebrow.center { justify-content: center; }
+
+  h1, h2, h3 { font-weight: 600; letter-spacing: -0.02em; line-height: 1.08; margin: 0; }
+  h2 { font-size: clamp(28px, 4.4vw, 40px); }
+  h3 { font-size: clamp(19px, 2.4vw, 23px); letter-spacing: -0.01em; }
+
+  .section-head { max-width: 760px; margin-bottom: clamp(36px, 5vw, 56px); }
+  .section-head p { color: var(--text-dim); font-size: clamp(16px, 2vw, 18px); margin: 16px 0 0; }
+
+  .vf { color: var(--vf-blue); }
+  .mono { font-family: var(--mono); }
+  .dim { color: var(--text-dim); }
+
+  /* ---------- Hero ---------- */
+  .hero { padding-top: clamp(64px, 9vw, 110px); padding-bottom: clamp(56px, 8vw, 104px); overflow: hidden; }
+  .hero h1 { font-size: clamp(40px, 8vw, 78px); line-height: 1.02; letter-spacing: -0.035em; max-width: 14ch; }
+  .hero h1 .l2 { color: var(--vf-blue); display: block; }
+  .hero-sub { margin: 30px 0 0; max-width: 60ch; font-size: clamp(17px, 2.2vw, 20px); color: var(--text-dim); }
+  .hero-sub strong { color: var(--text-primary); font-weight: 500; }
+
+  .hero-pulse-wrap {
+    margin-top: clamp(40px, 6vw, 64px); position: relative;
+    border: 1px solid var(--hairline); border-radius: 14px;
+    background: linear-gradient(180deg, rgba(59,113,208,0.05), rgba(59,113,208,0) 70%), var(--surface);
+    overflow: hidden;
+  }
+  .hero-pulse-meta {
+    position: absolute; left: 18px; top: 14px; z-index: 2;
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--text-dim);
+    display: flex; align-items: center; gap: 9px;
+  }
+  .hero-pulse-meta .led { width: 7px; height: 7px; border-radius: 50%; background: var(--vf-blue); box-shadow: 0 0 10px var(--vf-blue); }
+  .hero-pulse-readout {
+    position: absolute; right: 18px; bottom: 14px; z-index: 2;
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; color: var(--text-dim);
+  }
+
+  /* ---------- EKG pulse component ---------- */
+  .ekg { display: block; width: 100%; height: 150px; }
+  .ekg svg { display: block; width: 100%; height: 100%; }
+  .ekg .wave { fill: none; stroke: var(--vf-blue); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; filter: drop-shadow(0 0 6px rgba(59,113,208,0.55)); transition: stroke 0.6s ease, opacity 0.5s ease; }
+  .ekg .flat { fill: none; stroke: var(--pulse-flatline); stroke-width: 2; opacity: 0; transition: opacity 0.5s ease; filter: drop-shadow(0 0 6px rgba(232,84,62,0.5)); }
+  .ekg .lead { fill: var(--vf-blue); opacity: 0.9; transition: fill 0.6s ease, opacity 0.4s ease; }
+  .ekg .wave-track { animation: ekg-scroll 6.5s linear infinite; }
+  .ekg.is-flat .wave { opacity: 0; }
+  .ekg.is-flat .flat { opacity: 1; }
+  .ekg.is-flat .lead { fill: var(--pulse-flatline); }
+  .ekg.is-flat .wave-track { animation-play-state: paused; }
+  @keyframes ekg-scroll { from { transform: translateX(0); } to { transform: translateX(-280px); } }
+  @media (prefers-reduced-motion: reduce) { .ekg .wave-track { animation: none; } .ekg .lead { display: none; } }
+
+  /* ---------- Stack strip (the three) ---------- */
+  .stack-strip {
+    border: 1px solid var(--hairline); border-radius: 14px; background: var(--surface);
+    padding: 22px clamp(20px, 3vw, 30px); display: flex; align-items: center; gap: clamp(16px, 3vw, 34px); flex-wrap: wrap;
+  }
+  .stack-strip .label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--text-dim); white-space: nowrap; }
+  .stack-chips { display: flex; gap: 10px; flex-wrap: wrap; }
+  .chip {
+    font-family: var(--mono); font-size: 14px; color: var(--text-primary);
+    border: 1px solid var(--hairline-strong); border-radius: 9px; padding: 9px 14px;
+    display: inline-flex; align-items: center; gap: 9px; background: var(--surface-2);
+  }
+  .chip .mk { font-size: 10.5px; font-weight: 700; color: var(--text-dim); letter-spacing: 0.06em; }
+  .stack-strip .tail { font-size: 14px; color: var(--text-dim); margin-left: auto; }
+  @media (max-width: 720px) { .stack-strip .tail { margin-left: 0; } }
+
+  /* ---------- Spectrum (kept) ---------- */
+  .spectrum {
+    background: var(--surface); border: 1px solid var(--hairline); border-radius: 14px;
+    padding: clamp(34px, 5vw, 56px) clamp(26px, 4vw, 48px) clamp(46px, 5vw, 60px); margin-top: 8px;
+  }
+  .spectrum-ends { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 40px; }
+  .spectrum-end { max-width: 30ch; }
+  .spectrum-end.right { text-align: right; margin-left: auto; }
+  .spectrum-end .h { font-family: var(--mono); font-size: 13.5px; font-weight: 600; color: var(--text-primary); display: block; margin-bottom: 4px; }
+  .spectrum-end .s { font-size: 13px; color: var(--text-dim); }
+  .spectrum-track-wrap { position: relative; padding: 30px 0 50px; }
+  .spectrum-track { position: relative; height: 3px; border-radius: 3px; background: linear-gradient(90deg, var(--vf-blue) 0%, rgba(124,138,166,0.5) 50%, var(--vf-blue) 100%); }
+  .spectrum-track::before, .spectrum-track::after { content: ""; position: absolute; top: -4px; width: 11px; height: 11px; border-radius: 50%; background: var(--ink); border: 2px solid var(--text-dim); }
+  .spectrum-track::before { left: -2px; } .spectrum-track::after { right: -2px; }
+  .spectrum-marker { position: absolute; top: 1.5px; transform: translate(-50%, -50%); }
+  .spectrum-dot { width: 16px; height: 16px; border-radius: 50%; margin: 0 auto; border: 3px solid var(--ink); }
+  .spectrum-marker.cw .spectrum-dot { background: var(--text-primary); box-shadow: 0 0 0 1px var(--hairline-strong); }
+  .spectrum-marker.vf .spectrum-dot { background: var(--vf-blue); box-shadow: 0 0 14px rgba(59,113,208,0.7); }
+  .spectrum-label { position: absolute; left: 50%; transform: translateX(-50%); white-space: nowrap; font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em; text-align: center; }
+  .spectrum-marker.cw .spectrum-label { top: 26px; color: var(--text-primary); }
+  .spectrum-marker.vf .spectrum-label { bottom: 26px; color: var(--vf-blue); }
+  .spectrum-label small { display: block; color: var(--text-dim); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; margin-top: 2px; }
+  @media (max-width: 640px) { .spectrum-ends { flex-direction: column; } .spectrum-end.right { text-align: left; margin-left: 0; } .spectrum-label { font-size: 11px; } }
+
+  .vf-angle { margin-top: 26px; padding: 18px 20px; border-left: 2px solid var(--vf-blue); background: var(--vf-blue-dim); border-radius: 0 8px 8px 0; font-size: 15.5px; }
+  .vf-angle .label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--vf-blue); display: block; margin-bottom: 6px; }
+
+  /* ---------- Cost-of-failure interactive chart ---------- */
+  .cost-panel {
+    display: grid; grid-template-columns: 1.45fr 1fr; gap: 22px; align-items: stretch;
+  }
+  .cost-panel > * { min-width: 0; }
+  @media (max-width: 920px) { .cost-panel { grid-template-columns: 1fr; } }
+
+  .cost-card { background: var(--surface); border: 1px solid var(--hairline); border-radius: 14px; padding: clamp(20px, 2.6vw, 28px); }
+
+  .ekg-strip { display: flex; flex-direction: column; gap: 0; border: 1px solid var(--hairline); border-radius: 10px; overflow: hidden; margin-bottom: 18px; background: var(--ink); }
+  .ekg-strip-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--hairline); }
+  .ekg-strip-head .t { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-dim); }
+  .ekg-status { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--vf-blue); display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+  .ekg-status .led { width: 7px; height: 7px; border-radius: 50%; background: var(--vf-blue); box-shadow: 0 0 9px var(--vf-blue); flex: none; }
+  .ekg-strip .ekg { height: 64px; }
+
+  .chart-host { width: 100%; }
+  .chart-host svg { display: block; width: 100%; height: auto; }
+  .chart-axis { stroke: var(--hairline); stroke-width: 1; }
+  .chart-grid { stroke: var(--hairline); stroke-width: 1; stroke-dasharray: 2 5; opacity: 0.6; }
+  .chart-tick { font-family: var(--mono); font-size: 10px; fill: var(--text-dim); }
+  .series { fill: none; stroke-width: 2.4; stroke-linejoin: round; stroke-linecap: round; transition: stroke-opacity 0.3s ease; }
+  .series.ideal { stroke: var(--text-dim); stroke-width: 1.4; stroke-dasharray: 3 5; opacity: 0.65; }
+  .series.pd { stroke: var(--pulse-flatline); }
+  .series.vf { stroke: var(--vf-blue); }
+  .waste-area { fill: rgba(232, 84, 62, 0.14); stroke: none; transition: opacity 0.3s ease; }
+  .fail-dot { fill: var(--pulse-flatline); }
+  .fail-ring { fill: none; stroke: var(--flat-line); stroke-width: 1.4; }
+  .series-end { font-family: var(--mono); font-size: 11px; font-weight: 600; }
+  .series-end.pd { fill: var(--pulse-flatline); }
+  .series-end.vf { fill: var(--vf-blue); }
+  .fail-tag { font-family: var(--mono); font-size: 10px; fill: var(--text-dim); }
+
+  .chart-legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 14px; font-family: var(--mono); font-size: 11.5px; color: var(--text-dim); }
+  .chart-legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .chart-legend i { width: 16px; height: 0; border-top-width: 2.4px; border-top-style: solid; display: inline-block; }
+  .chart-legend i.ideal { border-top-style: dashed; border-color: var(--text-dim); }
+  .chart-legend i.pd { border-color: var(--pulse-flatline); }
+  .chart-legend i.vf { border-color: var(--vf-blue); }
+
+  /* segmented toggle */
+  .seg { display: inline-flex; padding: 4px; border: 1px solid var(--hairline-strong); border-radius: 10px; background: var(--ink); margin-bottom: 22px; }
+  .seg button {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em; padding: 9px 14px; border: none; border-radius: 7px;
+    background: transparent; color: var(--text-dim); cursor: pointer; transition: background 0.2s ease, color 0.2s ease;
+  }
+  .seg button[aria-pressed="true"] { color: var(--text-primary); background: var(--surface-2); }
+  .seg button.pd[aria-pressed="true"] { color: var(--pulse-flatline); box-shadow: inset 0 0 0 1px var(--flat-line); }
+  .seg button.vf[aria-pressed="true"] { color: var(--vf-blue); box-shadow: inset 0 0 0 1px var(--vf-blue-line); }
+  .seg button:focus-visible { outline: 2px solid var(--vf-blue); outline-offset: 2px; }
+
+  .mode-caption { font-size: 14.5px; color: var(--text-dim); margin: 0 0 22px; min-height: 3em; }
+  .mode-caption b { color: var(--text-primary); font-weight: 500; }
+  .mode-caption.pd b { color: var(--pulse-flatline); }
+
+  /* sliders */
+  .field { margin-bottom: 20px; }
+  .field-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+  .field-label { font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-dim); }
+  .field-value { font-family: var(--mono); font-size: 16px; font-weight: 600; color: var(--text-primary); }
+  input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; border-radius: 4px; background: var(--surface-2); outline: none; cursor: pointer; margin: 2px 0; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 19px; height: 19px; border-radius: 50%; background: var(--vf-blue); border: 3px solid var(--ink); box-shadow: 0 0 0 1px var(--vf-blue-line), 0 0 12px rgba(59,113,208,0.5); cursor: pointer; transition: transform 0.12s ease; }
+  input[type="range"]::-moz-range-thumb { width: 19px; height: 19px; border-radius: 50%; background: var(--vf-blue); border: 3px solid var(--ink); box-shadow: 0 0 0 1px var(--vf-blue-line); cursor: pointer; }
+  input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
+  input[type="range"].danger::-webkit-slider-thumb { background: var(--pulse-flatline); box-shadow: 0 0 0 1px var(--flat-line), 0 0 12px rgba(232,84,62,0.5); }
+  input[type="range"].danger::-moz-range-thumb { background: var(--pulse-flatline); }
+  input[type="range"]:focus-visible { outline: 2px solid var(--vf-blue); outline-offset: 4px; border-radius: 6px; }
+  input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 2px solid var(--text-primary); outline-offset: 2px; }
+  .field-scale { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 10.5px; color: var(--text-dim); margin-top: 5px; }
+
+  /* readout + bars */
+  .cost-readout { margin-top: 24px; padding-top: 22px; border-top: 1px solid var(--hairline); }
+  .readout-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 22px; }
+  .readout-cell .k { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-dim); display: block; }
+  .readout-cell .v { font-family: var(--mono); font-size: clamp(20px, 3vw, 26px); font-weight: 700; margin-top: 4px; }
+  .readout-cell .v.pd { color: var(--pulse-flatline); }
+  .readout-cell .v.vf { color: var(--vf-blue); }
+  .readout-cell .v.neutral { color: var(--text-primary); }
+
+  .spend-bars { display: flex; flex-direction: column; gap: 14px; }
+  .spend-bar .bar-top { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 11px; color: var(--text-dim); margin-bottom: 6px; }
+  .spend-bar .bar-top .amt { color: var(--text-primary); }
+  .bar-track { height: 16px; border-radius: 5px; background: var(--surface-2); overflow: hidden; display: flex; }
+  .bar-seg { height: 100%; transition: width 0.35s ease; }
+  .bar-seg.prod { background: var(--vf-blue); }
+  .bar-seg.waste { background: var(--pulse-flatline); }
+  .bar-legend { display: flex; gap: 16px; margin-top: 4px; font-family: var(--mono); font-size: 10.5px; color: var(--text-dim); }
+  .bar-legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .bar-legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  .bar-legend i.prod { background: var(--vf-blue); } .bar-legend i.waste { background: var(--pulse-flatline); }
+
+  /* ---------- Routing diagram (kept, now 3 neoclouds) ---------- */
+  .routing { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 8px; }
+  @media (max-width: 760px) { .routing { grid-template-columns: 1fr; } }
+  .route-panel { background: var(--surface); border: 1px solid var(--hairline); border-radius: 14px; padding: 26px 24px 30px; }
+  .route-panel.multi { border-color: var(--vf-blue-line); background: linear-gradient(180deg, rgba(59,113,208,0.05), rgba(59,113,208,0) 60%), var(--surface); }
+  .route-title { font-family: var(--mono); font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-dim); margin: 0 0 22px; }
+  .route-panel.multi .route-title { color: var(--vf-blue); }
+  .node { font-family: var(--mono); font-size: 13px; border-radius: 9px; padding: 11px 14px; text-align: center; border: 1px solid var(--hairline-strong); background: var(--surface-2); color: var(--text-primary); }
+  .node.vf { border-color: var(--vf-blue); color: var(--vf-blue); background: var(--vf-blue-dim); font-weight: 600; }
+  .node.dead { border-style: dashed; border-color: var(--flat-line); color: var(--pulse-flatline); background: var(--flat-dim); }
+  .node.sub { font-size: 12px; padding: 9px 8px; color: var(--text-primary); border-color: var(--vf-blue-line); }
+  .connector { display: grid; justify-items: center; }
+  .connector .line { width: 1px; height: 20px; background: var(--hairline-strong); }
+  .connector.dead .line { background: var(--flat-line); }
+  .connector .arrow { font-size: 11px; color: var(--text-dim); line-height: 0.6; }
+  .connector.dead .arrow { color: var(--pulse-flatline); }
+  .fanout { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 4px; }
+  @media (max-width: 380px) { .fanout { grid-template-columns: 1fr; } }
+  .route-note { font-size: 13px; color: var(--text-dim); margin: 20px 0 0; line-height: 1.55; }
+  .route-note.fail b { color: var(--pulse-flatline); }
+
+  /* ---------- Comparison table ---------- */
+  .table-scroll { overflow-x: auto; border: 1px solid var(--hairline); border-radius: 14px; -webkit-overflow-scrolling: touch; }
+  table.cmp { border-collapse: collapse; width: 100%; min-width: 760px; font-size: 14.5px; }
+  table.cmp th, table.cmp td { text-align: left; padding: 16px 18px; vertical-align: top; border-bottom: 1px solid var(--hairline); }
+  table.cmp thead th { position: sticky; top: 0; background: var(--surface-2); font-family: var(--mono); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); font-weight: 600; z-index: 2; }
+  table.cmp thead th.vfcol { color: var(--vf-blue); }
+  table.cmp tbody th { font-family: var(--mono); font-weight: 500; font-size: 12.5px; letter-spacing: 0.02em; color: var(--text-primary); background: var(--surface); position: sticky; left: 0; z-index: 1; min-width: 190px; }
+  table.cmp td { color: var(--text-dim); }
+  table.cmp td.vfcol { color: var(--text-primary); background: var(--vf-blue-dim); }
+  table.cmp tr:last-child th, table.cmp tr:last-child td { border-bottom: none; }
+  .table-hint { font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-dim); margin: 14px 0 0; display: none; }
+  @media (max-width: 760px) { .table-hint { display: block; } }
+
+  /* ---------- Architecture sandwich ---------- */
+  .arch { background: var(--surface); border: 1px solid var(--hairline); border-radius: 16px; padding: clamp(32px, 5vw, 56px); }
+  .arch-flow { display: flex; flex-direction: column; align-items: center; gap: 0; }
+  .arch-node.team { padding: 14px 26px; font-family: var(--mono); font-size: 14px; border: 1px solid var(--hairline-strong); background: var(--surface-2); color: var(--text-primary); border-radius: 11px; text-align: center; }
+  .arch-vf { width: 100%; max-width: 560px; border: 1px solid var(--vf-blue); background: var(--vf-blue-dim); border-radius: 14px; padding: 22px 24px; text-align: center; }
+  .arch-vf .name { font-family: var(--mono); font-weight: 600; font-size: 16px; color: var(--vf-blue); letter-spacing: 0.02em; }
+  .arch-vf .mechs { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 14px; }
+  .arch-vf .mech { font-family: var(--mono); font-size: 11.5px; color: var(--text-primary); border: 1px solid var(--vf-blue-line); border-radius: 20px; padding: 6px 12px; background: rgba(59,113,208,0.08); }
+  .arch-providers { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; max-width: 640px; }
+  .arch-provider { font-family: var(--mono); font-size: 13px; padding: 11px 18px; border-radius: 9px; border: 1px solid var(--hairline-strong); background: var(--surface-2); color: var(--text-primary); }
+  .arch-provider.more { color: var(--text-dim); border-style: dashed; }
+  .arch-connector { width: 1px; height: 26px; background: var(--vf-blue-line); }
+  .arch-fan { width: 100%; display: flex; justify-content: center; }
+  .arch-fan svg { display: block; max-width: 640px; width: 100%; height: 30px; }
+  .priority { margin-top: clamp(32px, 4vw, 44px); border-top: 1px solid var(--hairline); padding-top: 28px; }
+  .priority .label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--vf-blue); }
+  .priority .sub { font-size: 14px; color: var(--text-dim); margin: 8px 0 18px; }
+  .priority-chain { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-family: var(--mono); font-size: 12.5px; }
+  .priority-chain .p { padding: 7px 12px; border-radius: 7px; background: var(--surface-2); border: 1px solid var(--hairline); color: var(--text-primary); }
+  .priority-chain .gt { color: var(--text-dim); }
+
+  /* ---------- Close ---------- */
+  .close { text-align: center; }
+  .close h2 { max-width: 18ch; margin: 0 auto; font-size: clamp(28px, 5vw, 46px); }
+  .close p { color: var(--text-dim); max-width: 56ch; margin: 22px auto 0; font-size: 17px; }
+  .cta-row { margin-top: 36px; display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+  .btn { font-family: var(--mono); font-size: 13px; letter-spacing: 0.06em; padding: 13px 24px; border-radius: 9px; border: 1px solid var(--vf-blue); background: var(--vf-blue); color: #fff; cursor: pointer; transition: background 0.2s ease; }
+  .btn:hover { background: #4a7fdb; text-decoration: none; }
+  .btn.ghost { background: transparent; color: var(--text-primary); border-color: var(--hairline-strong); }
+  .btn.ghost:hover { border-color: var(--text-dim); background: rgba(255,255,255,0.02); }
+  .btn:focus-visible { outline: 2px solid var(--text-primary); outline-offset: 3px; }
+
+  footer { border-top: 1px solid var(--hairline); padding: 30px 0; }
+  footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; font-family: var(--mono); font-size: 12px; color: var(--text-dim); letter-spacing: 0.04em; }
+
+  .reveal { opacity: 0; transform: translateY(16px); transition: opacity 0.7s ease, transform 0.7s ease; }
+  .reveal.in { opacity: 1; transform: none; }
+  @media (prefers-reduced-motion: reduce) { .reveal { opacity: 1; transform: none; transition: none; } }
+
+  a.skip { position: absolute; left: -9999px; top: 0; }
+  a.skip:focus { left: 12px; top: 12px; z-index: 100; background: var(--vf-blue); color: #fff; padding: 8px 14px; border-radius: 6px; font-family: var(--mono); font-size: 13px; }
+
+  .topbar { position: sticky; top: 0; z-index: 50; background: rgba(11, 18, 32, 0.72); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-bottom: 1px solid var(--hairline); }
+  .topbar .wrap { display: flex; align-items: center; justify-content: space-between; height: 58px; }
+  .topbar .brand { font-family: var(--mono); font-weight: 600; letter-spacing: 0.04em; font-size: 15px; color: var(--text-primary); }
+  .topbar .brand span { color: var(--vf-blue); }
+  .topbar nav a { font-family: var(--mono); font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-dim); text-decoration: none; }
+  .topbar nav a:hover { color: var(--text-primary); }
+  .topbar nav a:focus-visible { outline: 2px solid var(--vf-blue); outline-offset: 3px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<a href="#main" class="skip">Skip to content</a>
+
+<header class="topbar">
+  <div class="wrap">
+    <div class="brand">VECTOR<span>FABRIC</span></div>
+    <nav><a href="reliability.html">Why</a></nav>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="wrap">
+      <p class="eyebrow">The reliability layer for GPU compute</p>
+      <h1>Three neoclouds.<span class="l2">One missing layer.</span></h1>
+      <p class="hero-sub">
+        Neoclouds sell raw GPU hours. VectorFabric sells <strong>job-completion certainty</strong> on top of them —
+        heartbeat-monitored liveness detection that catches a dead node the moment it goes silent, and
+        checkpoint-aware automatic retry that resumes the run instead of restarting it.
+      </p>
+
+      <div class="hero-pulse-wrap">
+        <div class="hero-pulse-meta"><span class="led"></span> Liveness · steady</div>
+        <div class="hero-pulse-readout">heartbeat ∙ ~72 bpm</div>
+        <div class="ekg" id="ekg-hero" data-amp="1"></div>
+      </div>
+
+      <!-- <div class="stack-strip reveal" style="margin-top:18px;">
+        <span class="label">Sits on top of</span>
+        <div class="stack-chips">
+          <span class="chip"><span class="mk">CW</span> CoreWeave</span>
+          <span class="chip"><span class="mk">RP</span> RunPod</span>
+          <span class="chip"><span class="mk">LL</span> Lambda Labs</span>
+        </div>
+        <span class="tail">Routes to all three. Replaces none.</span>
+      </div> -->
+    </div>
+  </section>
+
+  <!-- SPECTRUM (kept) -->
+  <section class="section-hairline">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="eyebrow">Uptime is not completion</p>
+        <h2>Scale and job-completion are different axes.</h2>
+        <p>A provider's SLA covers whether the infrastructure stays up, not whether your specific run survives a failure.</p>
+      </div>
+
+      <div class="spectrum reveal">
+        <div class="spectrum-ends">
+          <div class="spectrum-end left">
+            <span class="h">Massive scale, enterprise contracts</span>
+            <span class="s">Reserved capacity, negotiated SLAs, infrastructure built for the largest labs.</span>
+          </div>
+          <div class="spectrum-end right">
+            <span class="h">Flexible, pay-as-you-go reliability</span>
+            <span class="s">What teams without an enterprise contract actually need: their specific run finishing.</span>
+          </div>
+        </div>
+
+        <div class="spectrum-track-wrap">
+          <div class="spectrum-track">
+            <div class="spectrum-marker cw" style="left: 20%;">
+              <div class="spectrum-dot"></div>
+              <div class="spectrum-label">CoreWeave<small>infrastructure uptime</small></div>
+            </div>
+            <div class="spectrum-marker vf" style="left: 78%;">
+              <div class="spectrum-dot"></div>
+              <div class="spectrum-label">VectorFabric<small>job completion</small></div>
+            </div>
+          </div>
+        </div>
+
+        <p class="dim" style="font-size:15px; max-width:74ch; margin:0;"><br>
+          A node staying <em>up</em> does not guarantee your training run survives a failure. Uptime and completion are not the same promise and the gap between them is where runs quietly die.
+        </p>
+
+        <div class="vf-angle">
+          <span class="label">VectorFabric</span>
+          VectorFabric routes to enterprise-scale capacity when that's the right fit and delivers the same job-completion guarantee on far cheaper providers when it isn't.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- COST OF FAILURE — interactive chart -->
+  <section id="cost" class="section-hairline">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="eyebrow">Cost of failure</p>
+        <h2>A failed run is paid for twice.</h2>
+        <p>The hourly rate is the cheap part. Drag the inputs, a node that dies late in a long run is trivial to recover from with checkpoints, and ruinous to restart from zero.</p>
+      </div>
+
+      <div class="cost-panel">
+        <!-- chart side -->
+        <div class="cost-card reveal">
+          <div class="seg" role="group" aria-label="Scenario">
+            <button class="pd" id="seg-pd" aria-pressed="true">Provider-direct</button>
+            <button class="vf" id="seg-vf" aria-pressed="false">With VectorFabric</button>
+          </div>
+
+          <div class="ekg-strip">
+            <div class="ekg-strip-head">
+              <span class="t">Node liveness · run timeline</span>
+              <span class="ekg-status" id="cost-status"><span class="led"></span> monitoring</span>
+            </div>
+            <div class="ekg" id="ekg-cost" data-amp="0.8"></div>
+          </div>
+
+          <p class="mode-caption pd" id="mode-caption"></p>
+
+          <div class="chart-host" id="cost-chart" aria-hidden="true"></div>
+
+          <div class="chart-legend">
+            <span><i class="ideal"></i> Ideal run (no failure)</span>
+            <span><i class="pd"></i> Provider-direct</span>
+            <span><i class="vf"></i> With VectorFabric</span>
+          </div>
+        </div>
+
+        <!-- controls + readout side -->
+        <div class="cost-card reveal">
+          <div class="field">
+            <div class="field-top"><label class="field-label" for="c-price">GPU price</label><span class="field-value" id="c-price-val">$2.50/hr</span></div>
+            <input type="range" id="c-price" min="0.5" max="8" step="0.05" value="2.5" />
+            <div class="field-scale"><span>$0.50</span><span>$8.00</span></div>
+          </div>
+
+          <div class="field">
+            <div class="field-top"><label class="field-label" for="c-run">Run length</label><span class="field-value" id="c-run-val">36 hrs</span></div>
+            <input type="range" id="c-run" min="8" max="72" step="1" value="36" />
+            <div class="field-scale"><span>8 hrs</span><span>72 hrs</span></div>
+          </div>
+
+          <div class="field">
+            <div class="field-top"><label class="field-label" for="c-fail">Node dies at hour</label><span class="field-value" id="c-fail-val">26</span></div>
+            <input type="range" id="c-fail" min="1" max="35" step="1" value="26" class="danger" />
+            <div class="field-scale"><span>hour 1</span><span id="c-fail-max">hour 36</span></div>
+          </div>
+
+          <div class="cost-readout">
+            <div class="readout-grid">
+              <div class="readout-cell">
+                <span class="k">Provider-direct total</span>
+                <span class="v pd" id="ro-pd">$215</span>
+              </div>
+              <div class="readout-cell">
+                <span class="k">With VectorFabric</span>
+                <span class="v vf" id="ro-vf">$91</span>
+              </div>
+              <div class="readout-cell">
+                <span class="k">Wasted on restart</span>
+                <span class="v neutral" id="ro-waste">$124</span>
+              </div>
+              <div class="readout-cell">
+                <span class="k">Spend recovered</span>
+                <span class="v vf" id="ro-pct">58%</span>
+              </div>
+            </div>
+
+            <div class="spend-bars">
+              <div class="spend-bar">
+                <div class="bar-top"><span>Provider-direct</span><span class="amt" id="bar-pd-amt">$215</span></div>
+                <div class="bar-track"><div class="bar-seg prod" id="bar-pd-prod"></div><div class="bar-seg waste" id="bar-pd-waste"></div></div>
+              </div>
+              <div class="spend-bar">
+                <div class="bar-top"><span>With VectorFabric</span><span class="amt" id="bar-vf-amt">$91</span></div>
+                <div class="bar-track"><div class="bar-seg prod" id="bar-vf-prod"></div><div class="bar-seg waste" id="bar-vf-waste"></div></div>
+              </div>
+              <div class="bar-legend"><span><i class="prod"></i> Productive spend</span><span><i class="waste"></i> Wasted on redone work</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="vf-angle reveal" style="max-width:78ch;">
+        <span class="label">VectorFabric</span>
+        Provider-direct, a dead node burns budget until a human notices, then the run restarts from zero. You pay for the lost progress twice. Heartbeat monitoring catches it on the spot, and checkpoint-aware retry resumes from the last good state.
+      </div>
+    </div>
+  </section>
+
+  <!-- ROUTING (kept, fanout = all three neoclouds) -->
+  <section class="section-hairline">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="eyebrow">Single path vs. multi-path</p>
+        <h2>One path is one point of failure.</h2>
+        <p>Wired to a single provider, a sold-out instance or a dead node is the end of the line. There is no path B.</p>
+      </div>
+
+      <div class="routing">
+        <div class="route-panel reveal">
+          <p class="route-title">Single path · provider-direct</p>
+          <div class="node">AI Team</div>
+          <div class="connector"><span class="line"></span><span class="arrow">▼</span></div>
+          <div class="node">Any single provider</div>
+          <div class="connector dead"><span class="line"></span><span class="arrow">▼</span></div>
+          <div class="node dead">✕ Out of capacity / node failure — dead end</div>
+          <p class="route-note fail">When capacity runs out or a node dies mid-run, there is <b>no alternative path and no failover.</b> The job stops where it stopped.</p>
+        </div>
+
+        <div class="route-panel multi reveal">
+          <p class="route-title">Multi-path · via VectorFabric</p>
+          <div class="node">AI Team</div>
+          <div class="connector"><span class="line"></span><span class="arrow">▼</span></div>
+          <div class="node vf">VectorFabric · routing + retry</div>
+          <div class="connector"><span class="line"></span><span class="arrow">▼</span></div>
+          <div class="fanout">
+            <div class="node sub">Provider-1</div>
+            <div class="node sub">Provider-2</div>
+            <div class="node sub">Provider-3</div>
+          </div>
+          <p class="route-note">If one provider is out of capacity, VectorFabric routes to another that has it and resumes failed jobs via checkpoint-aware retry.</p>
+        </div>
+      </div>
+
+      <div class="vf-angle reveal" style="max-width:74ch;">
+        <span class="label">VectorFabric </span>
+        VectorFabric routes around any provider automatically when capacity isn't available, and resumes failed jobs via checkpoint-aware retry, something a single-provider path offers no equivalent for.
+      </div>
+    </div>
+  </section>
+
+  <!-- COMPARISON TABLE -->
+  <section id="table" class="section-hairline">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="eyebrow">Where Value Shows Up</p>
+        <h2>What you're actually buying.</h2>
+        <p>Three providers sell GPU hours. VectorFabric sells what happens to your job while those hours run.</p>
+      </div>
+
+      <div class="table-scroll reveal">
+        <table class="cmp">
+          <thead>
+            <tr>
+              <th>Dimension</th>
+              <th>CoreWeave</th>
+              <th>RunPod</th>
+              <th>Lambda Labs</th>
+              <th class="vfcol">VectorFabric</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><th>What's being sold</th><td>Raw compute</td><td>Raw compute</td><td>Raw compute</td><td class="vfcol">Job-completion reliability</td></tr>
+            <tr><th>Failure detection</th><td>Dashboard-dependent</td><td>Dashboard-dependent</td><td>Dashboard-dependent</td><td class="vfcol">Heartbeat-monitored liveness detection</td></tr>
+            <tr><th>Recovery from node death</th><td>Manual restart, lost progress</td><td>Manual restart, lost progress</td><td>Manual restart, lost progress</td><td class="vfcol">Checkpoint-aware automatic retry</td></tr>
+            <tr><th>Provider lock-in</th><td>High · provider-specific APIs</td><td>High · provider-specific APIs</td><td>High · provider-specific APIs</td><td class="vfcol">None · single integration point</td></tr>
+            <tr><th>True cost visibility</th><td>Listed hourly rate only</td><td>Listed hourly rate only</td><td>Listed hourly rate only</td><td class="vfcol">Real cost of a completed run</td></tr>
+            <tr><th>Worker / host quality signal</th><td>Opaque</td><td>Opaque</td><td>Opaque</td><td class="vfcol">Reliability tracking · routes away from known-bad capacity</td></tr>
+            <tr><th>Evidence when something breaks</th><td>Basic logs</td><td>Basic logs</td><td>Basic logs</td><td class="vfcol">Structured evidence logging</td></tr>
+            <tr><th>Best fit</th><td>Raw-hardware buyers willing to build their own reliability layer</td><td>Raw-hardware buyers willing to build their own reliability layer</td><td>Raw-hardware buyers willing to build their own reliability layer</td><td class="vfcol">Teams who want cheap hardware <em>and</em> reliability without building it themselves</td></tr>
+            <tr><th>Relationship to the others</th><td>—</td><td>—</td><td>—</td><td class="vfcol">Complementary · routes to different providers.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="table-hint">↔ scroll to compare all four columns</p>
+    </div>
+  </section>
+
+  <!-- ARCHITECTURE -->
+  <section id="arch" class="section-hairline">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <p class="eyebrow">Where it sits</p>
+        <h2>Between your team and every provider. Not in place of any.</h2>
+        <p>One integration point. Heartbeat monitoring, checkpoint-aware retry, and intelligent routing sit on top of the compute you already buy.</p>
+      </div>
+
+      <div class="arch reveal">
+        <div class="arch-flow">
+          <div class="arch-node team">AI Team · one integration</div>
+          <div class="arch-connector"></div>
+          <div class="arch-vf">
+            <div class="name">VectorFabric</div>
+            <div class="mechs">
+              <span class="mech">heartbeat monitoring</span>
+              <span class="mech">checkpoint-aware retry</span>
+              <span class="mech">intelligent routing</span>
+            </div>
+          </div>
+          <div class="arch-fan" aria-hidden="true">
+            <svg viewBox="0 0 600 30" preserveAspectRatio="xMidYMid meet">
+              <g stroke="var(--vf-blue-line)" stroke-width="1.4" fill="none">
+                <path d="M300 0 L300 10 L80 22 L80 30" />
+                <path d="M300 0 L300 10 L227 22 L227 30" />
+                <path d="M300 0 L300 10 L373 22 L373 30" />
+                <path d="M300 0 L300 10 L520 22 L520 30" />
+              </g>
+            </svg>
+          </div>
+          <div class="arch-providers">
+            <div class="arch-provider">Provider-1</div>
+            <div class="arch-provider">Provider-2</div>
+            <div class="arch-provider">Provider-3</div>
+            <div class="arch-provider more">+ others</div>
+          </div>
+        </div>
+
+        <div class="priority">
+          <span class="label">The intelligence you don't have to build yourself</span>
+          <p class="sub">VectorFabric's internal routing priority — applied automatically, recomputed against live availability and reliability.</p>
+          <!-- <div class="priority-chain">
+            <span class="p">RunPod</span><span class="gt">›</span>
+            <span class="p">Lambda</span><span class="gt">›</span>
+            <span class="p">CoreWeave</span><span class="gt">›</span>
+            <span class="p">Crusoe</span><span class="gt">›</span>
+            <span class="p">Nebius</span><span class="gt">›</span>
+            <span class="p">JarvisLabs</span><span class="gt">›</span>
+            <span class="p">Spheron</span><span class="gt">›</span>
+            <span class="p">E2E</span><span class="gt">›</span>
+            <span class="p">Vast.AI</span>
+          </div> -->
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CLOSE -->
+  <section class="section-hairline close">
+    <div class="wrap">
+      <div class="reveal">
+        <h2>Neoclouds sell the hardware. <span class="vf">VectorFabric makes sure the job finishes.</span></h2>
+        <p>The reliability layer your providers don't ship. Heartbeat-monitored liveness and checkpoint-aware retry and intelligent routing.</p>
+        <div class="cta-row">
+          <a class="btn" href="mailto:hello@vectorfabric.io?subject=VectorFabric%20—%20design%20partner%20%2F%20investor%20intro">Get in touch</a>
+          <a class="btn ghost" href="https://vectorfabric.io/" target="_blank" rel="noopener">vectorfabric.io</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 Dhitantra Inc. d/b/a Vector Fabric</span>
+    <!-- <span>Patent Pending · Reliability layer for GPU job completion</span> -->
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+  var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ---------- EKG builder ---------- */
+  function cyclePath(x0, amp) {
+    var b = 40, up = b - 22 * amp, dn = b + 12 * amp, p = b - 5 * amp;
+    return "L" + (x0 + 70) + " " + b +
+           " L" + (x0 + 84) + " " + p +
+           " L" + (x0 + 98) + " " + b +
+           " L" + (x0 + 150) + " " + b +
+           " L" + (x0 + 158) + " " + (b + 4 * amp) +
+           " L" + (x0 + 166) + " " + up +
+           " L" + (x0 + 174) + " " + dn +
+           " L" + (x0 + 182) + " " + b +
+           " L" + (x0 + 280) + " " + b;
+  }
+  function buildEKG(el) {
+    var amp = parseFloat(el.getAttribute("data-amp")) || 1, tile = 280, tiles = 8, d = "M0 40 ", i;
+    for (i = 0; i < tiles; i++) d += cyclePath(i * tile, amp);
+    var NS = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", "0 0 1120 80"); svg.setAttribute("preserveAspectRatio", "none");
+    var track = document.createElementNS(NS, "g"); track.setAttribute("class", "wave-track");
+    var wave = document.createElementNS(NS, "path"); wave.setAttribute("class", "wave"); wave.setAttribute("d", d); track.appendChild(wave);
+    var lead = document.createElementNS(NS, "circle"); lead.setAttribute("class", "lead"); lead.setAttribute("r", "3.2"); lead.setAttribute("cx", "1120"); lead.setAttribute("cy", "40"); track.appendChild(lead);
+    svg.appendChild(track);
+    var flat = document.createElementNS(NS, "path"); flat.setAttribute("class", "flat"); flat.setAttribute("d", "M0 40 H1120"); svg.appendChild(flat);
+    el.appendChild(svg); return el;
+  }
+  var heroEkg = document.getElementById("ekg-hero");
+  var costEkg = document.getElementById("ekg-cost");
+  if (heroEkg) buildEKG(heroEkg);
+  if (costEkg) buildEKG(costEkg);
+
+  /* ---------- Cost-of-failure chart ---------- */
+  var price = document.getElementById("c-price");
+  var run = document.getElementById("c-run");
+  var fail = document.getElementById("c-fail");
+  var priceVal = document.getElementById("c-price-val");
+  var runVal = document.getElementById("c-run-val");
+  var failVal = document.getElementById("c-fail-val");
+  var failMax = document.getElementById("c-fail-max");
+  var chartHost = document.getElementById("cost-chart");
+  var status = document.getElementById("cost-status");
+  var caption = document.getElementById("mode-caption");
+  var segPd = document.getElementById("seg-pd");
+  var segVf = document.getElementById("seg-vf");
+
+  var mode = "pd"; // 'pd' | 'vf'
+
+  // chart geometry
+  var W = 720, Hh = 360, PAD = { l: 52, r: 22, t: 16, b: 32 };
+  function money(n) { return "$" + Math.round(n).toLocaleString("en-US"); }
+
+  function model() {
+    var p = parseFloat(price.value);
+    var H = parseInt(run.value, 10);
+    var f = Math.min(parseInt(fail.value, 10), H);
+    var d = Math.max(2, Math.round(0.12 * H));  // dashboard-dependent detection lag
+    var c = 0.5;                                 // checkpoint recompute since last good state
+    var pdHours = f + d + H, vfHours = H + c;
+    // X axis = job progress (useful work, 0..H). Y axis = cumulative cost.
+    // Provider-direct backtracks progress to 0 on restart while cost keeps climbing.
+    return {
+      p: p, H: H, f: f, d: d, c: c,
+      ideal: [[0, 0], [H, p * H]],
+      vf: [[0, 0], [f, p * f], [f, p * (f + c)], [H, p * (H + c)]],
+      pd: [[0, 0], [f, p * f], [0, p * (f + d)], [H, p * (f + d + H)]],
+      pdTotal: p * pdHours, vfTotal: p * vfHours,
+      xMax: H, yMax: p * pdHours,
+      waste: p * (f + d - c), prod: p * H, pdWaste: p * (f + d), vfWaste: p * c
+    };
+  }
+
+  function renderClean() {
+    var m = model();
+    var X = function (h) { return PAD.l + (h / m.xMax) * (W - PAD.l - PAD.r); };
+    var Y = function (d) { return Hh - PAD.b - (d / m.yMax) * (Hh - PAD.t - PAD.b); };
+    var pts = function (arr) { return arr.map(function (q) { return X(q[0]) + "," + Y(q[1]); }).join(" "); };
+
+    var grid = "", yt, xt, i;
+    for (i = 0; i <= 4; i++) {
+      yt = (m.yMax / 4) * i;
+      grid += '<line class="chart-grid" x1="' + PAD.l + '" y1="' + Y(yt).toFixed(1) + '" x2="' + (W - PAD.r) + '" y2="' + Y(yt).toFixed(1) + '"/>';
+      grid += '<text class="chart-tick" x="' + (PAD.l - 8) + '" y="' + (Y(yt) + 3).toFixed(1) + '" text-anchor="end">' + money(yt) + '</text>';
+    }
+    var xticks = [0, 0.5, 1];
+    for (i = 0; i < xticks.length; i++) {
+      xt = xticks[i];
+      grid += '<text class="chart-tick" x="' + X(xt * m.xMax).toFixed(1) + '" y="' + (Hh - PAD.b + 16) + '" text-anchor="' + (i === 0 ? "start" : i === 2 ? "end" : "middle") + '">' + Math.round(xt * 100) + '%</text>';
+    }
+    grid += '<text class="chart-tick" x="' + ((PAD.l + W - PAD.r) / 2).toFixed(1) + '" y="' + (Hh - 2) + '" text-anchor="middle" style="letter-spacing:.12em">JOB PROGRESS →</text>';
+
+    // waste = real enclosed area between the two paths from the failure point onward
+    var wpoly = [
+      [m.f, m.p * m.f], [0, m.p * (m.f + m.d)], [m.H, m.pdTotal],
+      [m.H, m.vfTotal], [m.f, m.p * (m.f + m.c)]
+    ];
+    var wasteOpacity = (mode === "pd") ? 1 : 0.32;
+    var pdOpacity = (mode === "pd") ? 1 : 0.28;
+    var vfOpacity = (mode === "vf") ? 1 : 0.28;
+    var fx = X(m.f), fyPd = Y(m.p * m.f);
+
+    var svg =
+      '<svg viewBox="0 0 ' + W + ' ' + Hh + '" preserveAspectRatio="xMidYMid meet" role="img" ' +
+      'aria-label="Cumulative cost versus job progress for a ' + m.H + '-hour run at ' + money(m.p) + ' per hour. The node dies at hour ' + m.f + '. Provider-direct restarts from zero progress and totals ' + money(m.pdTotal) + '; VectorFabric resumes from a checkpoint and totals ' + money(m.vfTotal) + '.">' +
+      grid +
+      '<polygon class="waste-area" style="opacity:' + wasteOpacity + '" points="' + pts(wpoly) + '"/>' +
+      '<line class="chart-axis" x1="' + PAD.l + '" y1="' + PAD.t + '" x2="' + PAD.l + '" y2="' + (Hh - PAD.b) + '"/>' +
+      '<line class="chart-axis" x1="' + PAD.l + '" y1="' + (Hh - PAD.b) + '" x2="' + (W - PAD.r) + '" y2="' + (Hh - PAD.b) + '"/>' +
+      '<polyline class="series ideal" points="' + pts(m.ideal) + '"/>' +
+      '<polyline class="series pd" style="stroke-opacity:' + pdOpacity + '" points="' + pts(m.pd) + '"/>' +
+      '<polyline class="series vf" style="stroke-opacity:' + vfOpacity + '" points="' + pts(m.vf) + '"/>' +
+      '<circle class="fail-ring" cx="' + fx.toFixed(1) + '" cy="' + fyPd.toFixed(1) + '" r="7"/>' +
+      '<circle class="fail-dot" cx="' + fx.toFixed(1) + '" cy="' + fyPd.toFixed(1) + '" r="3.2"/>' +
+      '<text class="fail-tag" x="' + (fx + 10).toFixed(1) + '" y="' + (fyPd - 9).toFixed(1) + '">node dies · hr ' + m.f + ' → restart</text>' +
+      '<text class="series-end pd" style="opacity:' + pdOpacity + '" x="' + (X(m.xMax) - 2).toFixed(1) + '" y="' + (Y(m.pdTotal) - 7).toFixed(1) + '" text-anchor="end">' + money(m.pdTotal) + '</text>' +
+      '<text class="series-end vf" style="opacity:' + vfOpacity + '" x="' + (X(m.xMax) - 2).toFixed(1) + '" y="' + (Y(m.vfTotal) + 16).toFixed(1) + '" text-anchor="end">' + money(m.vfTotal) + '</text>' +
+      '</svg>';
+    chartHost.innerHTML = svg;
+
+    priceVal.textContent = "$" + m.p.toFixed(2) + "/hr";
+    runVal.textContent = m.H + " hrs";
+    failVal.textContent = m.f;
+
+    document.getElementById("ro-pd").textContent = money(m.pdTotal);
+    document.getElementById("ro-vf").textContent = money(m.vfTotal);
+    document.getElementById("ro-waste").textContent = money(m.waste);
+    document.getElementById("ro-pct").textContent = Math.round((m.waste / m.pdTotal) * 100) + "%";
+
+    var scale = m.pdTotal;
+    document.getElementById("bar-pd-amt").textContent = money(m.pdTotal);
+    document.getElementById("bar-vf-amt").textContent = money(m.vfTotal);
+    document.getElementById("bar-pd-prod").style.width = (m.prod / scale * 100) + "%";
+    document.getElementById("bar-pd-waste").style.width = (m.pdWaste / scale * 100) + "%";
+    document.getElementById("bar-vf-prod").style.width = (m.prod / scale * 100) + "%";
+    document.getElementById("bar-vf-waste").style.width = (m.vfWaste / scale * 100) + "%";
+  }
+
+  function applyMode() {
+    var pd = mode === "pd";
+    segPd.setAttribute("aria-pressed", pd ? "true" : "false");
+    segVf.setAttribute("aria-pressed", pd ? "false" : "true");
+    caption.className = "mode-caption " + (pd ? "pd" : "vf");
+    if (pd) {
+      costEkg.classList.add("is-flat");
+      status.style.color = "var(--pulse-flatline)";
+      status.innerHTML = '<span class="led" style="background:var(--pulse-flatline);box-shadow:0 0 9px var(--pulse-flatline)"></span> flatline · death undetected';
+      caption.innerHTML = "The node dies and <b>nothing flags it.</b> Budget keeps burning until a human notices, then the run restarts from zero — the lost progress is paid for twice.";
+    } else {
+      costEkg.classList.remove("is-flat");
+      status.style.color = "var(--vf-blue)";
+      status.innerHTML = '<span class="led"></span> heartbeat · caught &amp; resumed';
+      caption.innerHTML = "Heartbeat monitoring <b>catches the silent node on the spot.</b> Checkpoint-aware retry resumes from the last good state — the run finishes close to schedule, near the ideal cost.";
+    }
+    renderClean();
+  }
+
+  function syncFailMax() {
+    var H = parseInt(run.value, 10);
+    fail.max = H - 1;
+    if (parseInt(fail.value, 10) > H - 1) fail.value = H - 1;
+    failMax.textContent = "hour " + H;
+  }
+
+  if (price && run && fail && chartHost) {
+    segPd.addEventListener("click", function () { mode = "pd"; applyMode(); });
+    segVf.addEventListener("click", function () { mode = "vf"; applyMode(); });
+    price.addEventListener("input", renderClean);
+    run.addEventListener("input", function () { syncFailMax(); renderClean(); });
+    fail.addEventListener("input", renderClean);
+    syncFailMax();
+    applyMode();
+  }
+
+  /* ---------- Reveal on scroll ---------- */
+  if (!reduceMotion && "IntersectionObserver" in window) {
+    var revObserver = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add("in"); revObserver.unobserve(e.target); } });
+    }, { threshold: 0.12 });
+    document.querySelectorAll(".reveal").forEach(function (el) { revObserver.observe(el); });
+  } else {
+    document.querySelectorAll(".reveal").forEach(function (el) { el.classList.add("in"); });
+  }
+})();
+</script>
+</body>
+</html>
